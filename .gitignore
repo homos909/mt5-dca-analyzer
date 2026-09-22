@@ -1,0 +1,12 @@
+# Du lieu that - KHONG dua len GitHub
+data/raw/
+*.db
+
+# File anh xuat ra (co the tao lai duoc tu code)
+*.png
+chain_report.csv
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
