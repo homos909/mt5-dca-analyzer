@@ -98,7 +98,31 @@ def parse_position_row(row):
     record["net_profit"] = float(record["profit"]) + float(record["commission"]) + float(record["swap"])
     return record
 
- 
+def resolve_chain_roots(positions):
+    """Sau khi có đủ tất cả positions, đi lại một lượt để sửa dca_chain_root
+    từ 'con trỏ tới lệnh ngay trước' thành 'gốc thật sự của cả chain'."""
+
+    # TODO: tạo dict tra cứu nhanh: key là position_id (string), value là record đó
+    # gợi ý: dict comprehension —  {record["position_id"]: record for record in ...}
+    lookup = {record["position_id"]: record for record in positions}
+
+    for record in positions:
+        if not record["is_dca"]:
+            continue  # lệnh gốc, dca_chain_root vốn đã là None, không cần sửa
+
+        pointer = record["dca_chain_root"]  # bắt đầu từ con trỏ hiện tại
+
+        # TODO: viết vòng lặp while — lặp tiếp chừng nào lệnh mà `pointer`
+        # đang trỏ tới (tức lookup[pointer]) VẪN LÀ một lệnh DCA khác
+        # (lookup[pointer]["is_dca"] == True), thì cập nhật:
+        #   pointer = lookup[pointer]["dca_chain_root"]
+        # rồi lặp tiếp, cho tới khi lookup[pointer]["is_dca"] == False
+        while pointer in lookup and lookup[pointer]["is_dca"]:
+            pointer = lookup[pointer]["dca_chain_root"]
+
+        record["dca_chain_root"] = pointer  # gán lại gốc thật đã truy vết được
+
+    return positions 
 
 if __name__ == "__main__":
     file_path = "data/raw/ReportHistory-158324.html"

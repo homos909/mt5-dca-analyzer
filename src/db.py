@@ -1,7 +1,23 @@
 
-import sqlite3
-from ingest import read_file, parse_tables, find_section_rows, parse_position_row
+import os
+from dotenv import load_dotenv
+import psycopg2
+from ingest import read_file, parse_tables, find_section_rows, parse_position_row, resolve_chain_roots
 from config import DB_PATH, RAW_HTML_PATH
+
+load_dotenv()  # đọc file .env, nạp DATABASE_URL vào os.environ
+
+def get_connection():
+    """Mở kết nối tới PostgreSQL, trả về connection object."""
+    # TODO: lấy giá trị DATABASE_URL từ biến môi trường
+    # gợi ý: dùng os.environ.get("...")
+    db_url = os.environ.get("DATABASE_URL")
+
+    # TODO: dùng psycopg2.connect() để mở kết nối
+    # gợi ý: psycopg2.connect() có thể nhận thẳng 1 connection string qua tham số `dsn`
+    conn = psycopg2.connect(dsn=db_url)
+   
+    return conn
 
 def create_table(conn):
     cursor = conn.cursor()
@@ -30,24 +46,20 @@ def create_table(conn):
 def migrate_table(conn):
     cursor = conn.cursor()
 
-    # Lay danh sach cot HIEN CO trong bang
-    cursor.execute("PRAGMA table_info(positions)")
-    existing_columns = [row[1] for row in cursor.fetchall()]
-    # row[1] la vi tri chua TEN COT trong ket qua PRAGMA — moi dong la 1 tuple
-    # (cid, name, type, notnull, dflt_value, pk)
+    # TODO: viết câu query lấy tên các cột hiện có từ information_schema.columns
+    # gợi ý cú pháp: SELECT column_name FROM information_schema.columns WHERE table_name = 'positions'
+    cursor.execute(""" SELECT column_name FROM information_schema.columns WHERE table_name= 'positions' """)
+    existing_columns = [row[0] for row in cursor.fetchall()]
+    # Lưu ý: row[0] chứ không phải row[1] như PRAGMA — vì SELECT chỉ lấy 1 cột (column_name),
+    # nên nó nằm ở vị trí 0 của tuple, không phải vị trí 1
 
-    # Danh sach cot MONG MUON, dang { ten_cot: kieu_du_lieu }
     required_columns = {
         "net_profit": "REAL",
-        # TODO: neu sau nay them cot moi, chi can khai bao them o day
-
     }
 
     for col_name, col_type in required_columns.items():
         if col_name not in existing_columns:
             print(f"Dang them cot con thieu: {col_name}")
-            # TODO: viet cau lenh ALTER TABLE de them cot nay vao bang "positions"
-            # Cu phap SQL: ALTER TABLE positions ADD COLUMN <ten_cot> <kieu_du_lieu>
             cursor.execute(f"ALTER TABLE positions ADD COLUMN {col_name} {col_type}")
 
     conn.commit()
@@ -56,16 +68,33 @@ def insert_positions(conn, positions):
     cursor = conn.cursor()
     for record in positions:
         cursor.execute("""
-            INSERT OR REPLACE INTO positions
+            INSERT INTO positions
             (position_id, time_open, time_close, symbol, type, comment,
              volume, price_open, price_close, commission, swap, profit, net_profit,
              is_dca, dca_sequence, dca_chain_root)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (position_id) DO UPDATE SET
+                time_open = EXCLUDED.time_open,
+                time_close = EXCLUDED.time_close,
+                symbol = EXCLUDED.symbol,
+                type = EXCLUDED.type,
+                comment = EXCLUDED.comment,
+                volume = EXCLUDED.volume,
+                price_open = EXCLUDED.price_open,
+                price_close = EXCLUDED.price_close,
+                commission = EXCLUDED.commission,
+                swap = EXCLUDED.swap,
+                profit = EXCLUDED.profit,
+                net_profit = EXCLUDED.net_profit,
+                is_dca = EXCLUDED.is_dca,
+                dca_sequence = EXCLUDED.dca_sequence,
+                dca_chain_root = EXCLUDED.dca_chain_root
         """, (
             int(record["position_id"]), record["time_open"], record["time_close"], record["symbol"], record["type"], record["comment"], float(record["volume"]),
             float(record["price_open"]), float(record["price_close"]), float(record["commission"]), float(record["swap"]), float(record["profit"]), float(record["net_profit"]), int(record["is_dca"]),
-            int(record["dca_sequence"]) if record["dca_sequence"] else None, int(record["dca_chain_root"]) if record["dca_chain_root"] else None # TODO: đưa đúng 15 giá trị vào đây, đúng thứ tự các cột ở trên
-        ))
+            int(record["dca_sequence"]) if record["dca_sequence"] else None, int(record["dca_chain_root"]) if record["dca_chain_root"] else None
+        ))  # (không cần dòng cho position_id, vì đó là cột dùng để so khớp "conflict")    
+
     conn.commit()    
 
 if __name__ == "__main__":
@@ -88,11 +117,12 @@ if __name__ == "__main__":
                 continue
             positions.append(parse_position_row(row))
 
-        conn = sqlite3.connect(DB_PATH)
+        positions = resolve_chain_roots(positions)    
+        conn = get_connection()
         create_table(conn)
         migrate_table(conn)
         insert_positions(conn, positions)
 
         conn.close()
 
-        print(f"Da luu {len(positions)} positions vao {DB_PATH}")
+        print(f"Da luu {len(positions)} positions vao PostgreSQL (Neon)")
