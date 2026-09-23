@@ -2,7 +2,7 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
-from ingest import read_file, parse_tables, find_section_rows, parse_position_row
+from ingest import read_file, parse_tables, find_section_rows, parse_position_row, resolve_chain_roots
 from config import DB_PATH, RAW_HTML_PATH
 
 load_dotenv()  # đọc file .env, nạp DATABASE_URL vào os.environ
@@ -117,6 +117,7 @@ if __name__ == "__main__":
                 continue
             positions.append(parse_position_row(row))
 
+        positions = resolve_chain_roots(positions)    
         conn = get_connection()
         create_table(conn)
         migrate_table(conn)
